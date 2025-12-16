@@ -1,0 +1,41 @@
+.gradle/
+build/
+*/build/
+.idea/
+*.iml
+local.properties
+.cxx/
+.externalNativeBuild/
+
+# Logs and reports
+*.log
+error.txt
+*.hprof
+*.orig
+*.rej
+
+# Binary artifacts
+*.apk
+*.aab
+*.ap_
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.swp
+
+# Secrets and signing
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+*.pem
+*.p12
+
+# Cloud config
+app/google-services.json
+
+# Project-specific
+/仕様書.md
+/*.png
+/Github/

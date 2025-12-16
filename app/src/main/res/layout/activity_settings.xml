@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+    
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+        
+        <!-- 撮影タイミング -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="撮影タイミング"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+        
+        <RadioGroup
+            android:id="@+id/rg_capture_delay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp">
+            
+            <RadioButton
+                android:id="@+id/rb_delay_none"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="即時撮影"
+                android:checked="true" />
+            
+            <RadioButton
+                android:id="@+id/rb_delay_1s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="1秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_delay_2s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_delay_3s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_delay_5s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="5秒後" />
+        </RadioGroup>
+        
+        <!-- 完了アクション記憶 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="完了アクションの記憶"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+        
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_remember_action"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="最後に選択したアクションを記憶する"
+            android:layout_marginBottom="24dp" />
+        
+        <!-- クリップボード自動クリア -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="クリップボードの自動クリア"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+        
+        <RadioGroup
+            android:id="@+id/rg_clipboard_clear"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="24dp">
+            
+            <RadioButton
+                android:id="@+id/rb_clear_15s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="15秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_clear_30s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="30秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_clear_60s"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="60秒後" />
+            
+            <RadioButton
+                android:id="@+id/rb_clear_never"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="クリアしない"
+                android:checked="true" />
+        </RadioGroup>
+        
+        <!-- 通知設定 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="通知設定"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+        
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/switch_show_notification"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="撮影完了時に通知を表示"
+            android:checked="true"
+            android:layout_marginBottom="24dp" />
+        
+        <!-- デフォルトに戻す -->
+        <Button
+            android:id="@+id/btn_reset_defaults"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="設定をリセット"
+            android:layout_marginTop="24dp" />
+        
+    </LinearLayout>
+    
+</ScrollView>

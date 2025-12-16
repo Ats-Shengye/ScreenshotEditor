@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Screenshot Editor</string>
+    <string name="settings_title">設定</string>
+    <string name="tile_label">スクリーンショット</string>
+    
+    <!-- Notifications -->
+    <string name="notification_channel_name">スクリーンショット撮影</string>
+    <string name="notification_channel_description">スクリーンショット撮影の通知</string>
+    <string name="notification_title">スクリーンショット撮影</string>
+    <string name="notification_content">タップして撮影</string>
+    <string name="notification_action_capture">撮影</string>
+    <string name="notification_action_stop">停止</string>
+    
+    <!-- Editor -->
+    <string name="editor_complete">完了</string>
+    <string name="editor_share">共有</string>
+    
+    <!-- Dialog -->
+    <string name="dialog_save_options_title">完了アクション</string>
+    <string name="dialog_save">保存</string>
+    <string name="dialog_copy_and_discard">コピーして破棄</string>
+    <string name="dialog_discard">保存しない</string>
+    <string name="dialog_cancel">キャンセル</string>
+    
+    <!-- Settings -->
+    <string name="settings_capture_timing">撮影タイミング</string>
+    <string name="settings_immediate_capture">即時撮影</string>
+    <string name="settings_delayed_capture">遅延撮影</string>
+    <string name="settings_delay_seconds">遅延秒数</string>
+    <string name="settings_remember_action">完了アクション記憶</string>
+    <string name="settings_remember_action_enabled">有効</string>
+    <string name="settings_reset_remembered">記憶をリセット</string>
+    <string name="settings_clipboard_auto_clear">クリップボード自動クリア</string>
+    <string name="settings_auto_clear_enabled">有効</string>
+    <string name="settings_clear_seconds">クリア秒数</string>
+    <string name="settings_clear_now">今すぐクリア</string>
+    <string name="settings_notifications">通知状態</string>
+    <string name="settings_persistent_notification">常駐通知を表示</string>
+    <string name="settings_notification_confirmation">通知で確認</string>
+    <string name="settings_disable_on_lock">ロック中固定OFF</string>
+    <string name="settings_save_location">保存先: Pictures/Screenshots</string>
+    
+    <!-- Messages -->
+    <string name="message_screenshot_failed">この画面は取得できませんでした</string>
+    <string name="message_save_failed">保存に失敗しました</string>
+    <string name="message_saved">スクリーンショットを保存しました</string>
+    <string name="message_copied">クリップボードにコピーしました</string>
+    <string name="message_clipboard_cleared">クリップボードをクリアしました</string>
+    <string name="message_permission_required">画面録画の権限が必要です</string>
+    <string name="message_countdown">撮影まで %d 秒</string>
+</resources>
