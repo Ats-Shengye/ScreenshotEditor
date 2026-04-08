@@ -14,10 +14,11 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.DisplayMetrics
+import android.util.Log
 import android.view.WindowMetrics
 import android.os.Build
 import android.widget.Toast
-import androidx.activity.result.ActivityResult // Added import
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.example.screenshoteditor.R
 import com.example.screenshoteditor.data.TempCache
@@ -27,9 +28,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.File
 import java.io.FileOutputStream
-// Removed: import android.app.Activity
 
 class CaptureActivity : ComponentActivity() {
+
+    companion object {
+        private const val TAG = "CaptureActivity"
+        private const val PREPARE_TIMEOUT_MS = 2000L
+    }
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private var mediaProjection: MediaProjection? = null
@@ -37,6 +42,8 @@ class CaptureActivity : ComponentActivity() {
     private var imageReader: ImageReader? = null
     private lateinit var settingsDataStore: SettingsDataStore
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var prepareTimeoutRunnable: Runnable? = null
 
     private val screenCapturePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -86,14 +93,40 @@ class CaptureActivity : ComponentActivity() {
             } else {
                 startService(serviceIntent)
             }
-            Handler(Looper.getMainLooper()).postDelayed({
+        }
+
+        // コールバックを登録してから昇格リクエストを送る
+        // タイムアウト: 2秒以内に昇格完了通知が来なければエラー扱い
+        val timeoutRunnable = Runnable {
+            Log.w(TAG, "startScreenCapture: prepare timeout, aborting")
+            CaptureService.onPrepareComplete = null
+            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
+            finish()
+        }.also { prepareTimeoutRunnable = it }
+
+        CaptureService.onPrepareComplete = {
+            // タイムアウトキャンセル
+            mainHandler.removeCallbacks(timeoutRunnable)
+            prepareTimeoutRunnable = null
+            // Foreground昇格完了後にgetMediaProjectionを呼ぶ
+            try {
                 mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
                 continueScreenCapture()
-            }, 500)
-        } else {
-            mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
-            continueScreenCapture()
+            } catch (e: Exception) {
+                Log.w(TAG, "getMediaProjection failed", e)
+                Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
+                finish()
+            }
         }
+
+        // Foreground昇格リクエスト送信
+        val prepareIntent = Intent(this, CaptureService::class.java).apply {
+            action = CaptureService.ACTION_PREPARE_CAPTURE
+        }
+        startService(prepareIntent)
+
+        // タイムアウトタイマー開始
+        mainHandler.postDelayed(timeoutRunnable, PREPARE_TIMEOUT_MS)
     }
     
     private fun continueScreenCapture() {
@@ -123,6 +156,15 @@ class CaptureActivity : ComponentActivity() {
         val density = resources.displayMetrics.densityDpi
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 1)
+
+        // Android 14+ requires callback registration before createVirtualDisplay()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+                override fun onStop() {
+                    cleanup()
+                }
+            }, Handler(Looper.getMainLooper()))
+        }
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenCapture",
@@ -205,6 +247,7 @@ class CaptureActivity : ComponentActivity() {
             }
             tempFile
         } catch (e: Exception) {
+            Log.w(TAG, "saveBitmapToTemp failed", e)
             null
         }
     }
@@ -229,6 +272,10 @@ class CaptureActivity : ComponentActivity() {
     
     override fun onDestroy() {
         super.onDestroy()
+        // タイムアウトとコールバックをクリア（Activity破棄後の参照を防ぐ）
+        prepareTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        prepareTimeoutRunnable = null
+        CaptureService.onPrepareComplete = null
         cleanup()
         activityScope.cancel()
     }

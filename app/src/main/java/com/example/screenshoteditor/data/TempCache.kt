@@ -2,6 +2,7 @@ package com.example.screenshoteditor.data
 
 import android.content.Context
 import java.io.File
+import java.util.UUID
 
 object TempCache {
     
@@ -17,8 +18,7 @@ object TempCache {
         // Clean old temp files
         cleanOldFiles(tempDir)
         
-        val timestamp = System.currentTimeMillis()
-        return File(tempDir, "temp_$timestamp.png")
+        return File(tempDir, "temp_${UUID.randomUUID()}.png")
     }
     
     fun getCacheFile(context: Context): File {
@@ -27,8 +27,7 @@ object TempCache {
             cacheDir.mkdirs()
         }
         
-        val timestamp = System.currentTimeMillis()
-        return File(cacheDir, "cache_$timestamp.png")
+        return File(cacheDir, "cache_${UUID.randomUUID()}.png")
     }
     
     fun getTempDir(context: Context): File {

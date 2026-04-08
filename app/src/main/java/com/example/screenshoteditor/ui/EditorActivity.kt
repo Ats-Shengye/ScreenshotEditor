@@ -4,6 +4,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -21,6 +22,7 @@ import java.io.File
 class EditorActivity : AppCompatActivity() {
 
     companion object {
+        private const val TAG = "EditorActivity"
         const val EXTRA_IMAGE_PATH = "image_path"
         const val ACTION_SAVE = "save"
         const val ACTION_COPY_DISCARD = "copy_discard"
@@ -44,14 +46,23 @@ class EditorActivity : AppCompatActivity() {
         mediaSaver = MediaStoreSaver(this)
         clipboardShare = ClipboardShare(this)
 
-        imagePath = intent.getStringExtra(EXTRA_IMAGE_PATH)
+        val rawPath = intent.getStringExtra(EXTRA_IMAGE_PATH)
 
-        if (imagePath == null) {
+        if (rawPath == null) {
             Toast.makeText(this, R.string.message_screenshot_failed, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
 
+        // パストラバーサル攻撃を防ぐため、受け取ったパスがtempDir配下であることを検証する
+        if (!isPathSafe(rawPath)) {
+            Log.w(TAG, "onCreate: invalid image path rejected: $rawPath")
+            Toast.makeText(this, "無効なファイルパスです", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
+
+        imagePath = rawPath
         loadImage()
         setupViews()
     }
@@ -69,12 +80,13 @@ class EditorActivity : AppCompatActivity() {
                     finish()
                 }
             } catch (e: Exception) {
+                Log.w(TAG, "loadImage failed", e)
                 Toast.makeText(this, R.string.message_screenshot_failed, Toast.LENGTH_SHORT).show()
                 finish()
             }
         }
     }
-    
+
     private fun setupViews() {
         binding.btnSave.setOnClickListener {
             executeAction(ACTION_SAVE)
@@ -255,11 +267,29 @@ class EditorActivity : AppCompatActivity() {
             .show()
     }
     
+    /**
+     * 受け取ったファイルパスがアプリのtempDir配下であることを検証する。
+     * パストラバーサル（"../"等）による任意ファイルアクセスを防ぐため、
+     * canonicalPathで正規化したパスを比較する。
+     */
+    private fun isPathSafe(path: String): Boolean {
+        return try {
+            val file = File(path)
+            val allowedDir = TempCache.getTempDir(this).canonicalPath
+            val canonicalPath = file.canonicalPath
+            canonicalPath.startsWith(allowedDir + File.separator) || canonicalPath == allowedDir
+        } catch (e: Exception) {
+            Log.w(TAG, "isPathSafe: path validation failed", e)
+            false
+        }
+    }
+
     private fun deleteTempFile() {
         imagePath?.let { path ->
             try {
                 File(path).delete()
             } catch (e: Exception) {
+                Log.w(TAG, "deleteTempFile failed: $path", e)
             }
         }
     }

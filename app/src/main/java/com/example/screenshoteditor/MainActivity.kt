@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,7 +17,11 @@ import com.example.screenshoteditor.databinding.ActivityMainBinding
 import com.example.screenshoteditor.ui.SettingsActivity
 
 class MainActivity : AppCompatActivity() {
-    
+
+    companion object {
+        private const val TAG = "MainActivity"
+    }
+
     private lateinit var binding: ActivityMainBinding
     
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -73,9 +78,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
+            Log.w(TAG, "checkNotificationPermission failed", e)
         }
     }
-    
+
     private fun startCaptureService() {
         try {
             val intent = Intent(this, CaptureService::class.java)

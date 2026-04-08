@@ -5,9 +5,9 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +17,7 @@ import java.io.FileOutputStream
 class ClipboardShare(private val context: Context) {
     
     companion object {
+        private const val TAG = "ClipboardShare"
         private const val CLIPBOARD_LABEL = "Screenshot"
     }
     
@@ -41,19 +42,12 @@ class ClipboardShare(private val context: Context) {
                 clipboardManager.setPrimaryClip(clip)
             }
             
-            // Grant read permission to all apps that might access clipboard
-            try {
-                context.grantUriPermission(
-                    "com.android.systemui",
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (_: Exception) {
-                // best-effort; 権限付与が不要/不可能でも失敗しない
-            }
+            // ClipData.newUri()でURIを設定することでシステムがURI権限を管理する
+            // 特定パッケージへのgrantUriPermissionハードコードは不要
 
             true
         } catch (e: Exception) {
+            Log.w(TAG, "copyImageToClipboard failed", e)
             false
         }
     }
@@ -66,6 +60,7 @@ class ClipboardShare(private val context: Context) {
                 val emptyClip = ClipData.newPlainText("", "")
                 clipboardManager.setPrimaryClip(emptyClip)
             } catch (e: Exception) {
+                Log.w(TAG, "scheduleClear: clipboard clear failed", e)
             }
         }
         
@@ -82,6 +77,7 @@ class ClipboardShare(private val context: Context) {
             val emptyClip = ClipData.newPlainText("", "")
             clipboardManager.setPrimaryClip(emptyClip)
         } catch (e: Exception) {
+            Log.w(TAG, "clearClipboardNow failed", e)
         }
     }
     
@@ -89,28 +85,26 @@ class ClipboardShare(private val context: Context) {
         try {
             val success = saveBitmapToFile(bitmap, shareFile)
             if (!success) return@withContext
-            
+
             val authority = "${context.packageName}.fileprovider"
             val uri = FileProvider.getUriForFile(context, authority, shareFile)
-            
+
             withContext(Dispatchers.Main) {
                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                     type = "image/png"
                     putExtra(Intent.EXTRA_STREAM, uri)
+                    // FLAG_GRANT_READ_URI_PERMISSIONをIntentに設定し、
+                    // システムのURI権限管理に委ねる（手動revokeは行わない）
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                
+
                 val chooser = Intent.createChooser(shareIntent, "スクリーンショットを共有")
                 chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(chooser)
-                Handler(Looper.getMainLooper()).postDelayed({
-                    try {
-                        context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    } catch (_: Exception) { }
-                }, 30 * 1000L)
             }
 
         } catch (e: Exception) {
+            Log.w(TAG, "shareImage failed", e)
         }
     }
     
@@ -123,6 +117,7 @@ class ClipboardShare(private val context: Context) {
             }
             true
         } catch (e: Exception) {
+            Log.w(TAG, "saveBitmapToFile failed: ${file.name}", e)
             false
         }
     }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
@@ -14,6 +15,7 @@ import java.util.*
 class MediaStoreSaver(private val context: Context) {
     
     companion object {
+        private const val TAG = "MediaStoreSaver"
         private val DIRECTORY_SCREENSHOTS = "${Environment.DIRECTORY_PICTURES}/Screenshots"
         private const val MIME_TYPE_PNG = "image/png"
         private const val DATE_FORMAT = "yyyy-MM-dd_HH-mm-ss_SSS"
@@ -49,6 +51,7 @@ class MediaStoreSaver(private val context: Context) {
                         }
                     }
                 } catch (e: Exception) {
+                    Log.w(TAG, "saveBitmapToGallery: write failed", e)
                 } finally {
                     outputStream?.close()
                 }
@@ -59,6 +62,7 @@ class MediaStoreSaver(private val context: Context) {
 
             false
         } catch (e: Exception) {
+            Log.w(TAG, "saveBitmapToGallery failed", e)
             false
         }
     }

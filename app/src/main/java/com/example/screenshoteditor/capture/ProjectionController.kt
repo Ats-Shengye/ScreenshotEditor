@@ -11,7 +11,7 @@ import android.media.projection.MediaProjectionManager
 class ProjectionController(
     private val context: Context,
     private val resultCode: Int,
-    private val data: Intent
+    private var data: Intent?
 ) {
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
@@ -28,8 +28,8 @@ class ProjectionController(
         imageReader: ImageReader
     ): VirtualDisplay? {
         this.imageReader = imageReader
-        
-        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
+        val consentData = data ?: return null
+        mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, consentData)
         
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenCapture",
@@ -49,9 +49,11 @@ class ProjectionController(
         imageReader?.close()
         virtualDisplay?.release()
         mediaProjection?.stop()
-        
+
         imageReader = null
         virtualDisplay = null
         mediaProjection = null
+        // consent tokenをnull化してメモリ内に保持しない
+        data = null
     }
 }
