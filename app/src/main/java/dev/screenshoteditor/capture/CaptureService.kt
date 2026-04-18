@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.capture
+package dev.screenshoteditor.capture
 
 import android.app.*
 import android.content.Context
@@ -11,10 +11,10 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.example.screenshoteditor.MainActivity
-import com.example.screenshoteditor.R
-import com.example.screenshoteditor.capture.CaptureActivity
-import com.example.screenshoteditor.data.SettingsDataStore
+import dev.screenshoteditor.MainActivity
+import dev.screenshoteditor.R
+import dev.screenshoteditor.capture.CaptureActivity
+import dev.screenshoteditor.data.SettingsDataStore
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
@@ -24,9 +24,9 @@ class CaptureService : Service() {
         private const val TAG = "CaptureService"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "screenshot_service"
-        const val ACTION_CAPTURE = "com.example.screenshoteditor.ACTION_CAPTURE"
-        const val ACTION_STOP = "com.example.screenshoteditor.ACTION_STOP"
-        const val ACTION_PREPARE_CAPTURE = "com.example.screenshoteditor.ACTION_PREPARE_CAPTURE"
+        const val ACTION_CAPTURE = "dev.screenshoteditor.ACTION_CAPTURE"
+        const val ACTION_STOP = "dev.screenshoteditor.ACTION_STOP"
+        const val ACTION_PREPARE_CAPTURE = "dev.screenshoteditor.ACTION_PREPARE_CAPTURE"
 
         @Volatile
         var isRunning = false

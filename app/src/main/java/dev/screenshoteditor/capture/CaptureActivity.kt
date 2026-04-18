@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.capture
+package dev.screenshoteditor.capture
 
 import androidx.activity.ComponentActivity
 import android.content.Context
@@ -20,10 +20,10 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import com.example.screenshoteditor.R
-import com.example.screenshoteditor.data.TempCache
-import com.example.screenshoteditor.data.SettingsDataStore
-import com.example.screenshoteditor.ui.EditorActivity
+import dev.screenshoteditor.R
+import dev.screenshoteditor.data.TempCache
+import dev.screenshoteditor.data.SettingsDataStore
+import dev.screenshoteditor.ui.EditorActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import java.io.File

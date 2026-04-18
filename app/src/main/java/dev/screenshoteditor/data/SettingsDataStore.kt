@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.data
+package dev.screenshoteditor.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore

@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.capture
+package dev.screenshoteditor.capture
 
 import android.content.Context
 import android.content.Intent

@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.tile
+package dev.screenshoteditor.tile
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -6,8 +6,8 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
-import com.example.screenshoteditor.capture.CaptureActivity
-import com.example.screenshoteditor.capture.CaptureService
+import dev.screenshoteditor.capture.CaptureActivity
+import dev.screenshoteditor.capture.CaptureService
 
 class ScreenshotTileService : TileService() {
 

@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.screenshoteditor"
+    namespace = "dev.screenshoteditor"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.screenshoteditor"
+        applicationId = "dev.screenshoteditor"
         minSdk = 30
         targetSdk = 36
         versionCode = 1

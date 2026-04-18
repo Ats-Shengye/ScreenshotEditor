@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.ui
+package dev.screenshoteditor.ui
 
 import android.content.Intent
 import android.graphics.Bitmap
@@ -10,9 +10,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.example.screenshoteditor.R
-import com.example.screenshoteditor.data.*
-import com.example.screenshoteditor.databinding.ActivityEditorBinding
+import dev.screenshoteditor.R
+import dev.screenshoteditor.data.*
+import dev.screenshoteditor.databinding.ActivityEditorBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch

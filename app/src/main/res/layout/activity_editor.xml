@@ -7,7 +7,7 @@
     android:background="#000000">
     
     <!-- クロップビュー（カスタムビュー） -->
-    <com.example.screenshoteditor.ui.CropView
+    <dev.screenshoteditor.ui.CropView
         android:id="@+id/crop_view"
         android:layout_width="0dp"
         android:layout_height="0dp"

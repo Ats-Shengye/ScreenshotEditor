@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.notif
+package dev.screenshoteditor.notif
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,9 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.example.screenshoteditor.MainActivity
-import com.example.screenshoteditor.R
-import com.example.screenshoteditor.capture.CaptureActivity
+import dev.screenshoteditor.MainActivity
+import dev.screenshoteditor.R
+import dev.screenshoteditor.capture.CaptureActivity
 
 object NotificationHelper {
     

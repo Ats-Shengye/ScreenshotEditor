@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.notif
+package dev.screenshoteditor.notif
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,8 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.example.screenshoteditor.R
-import com.example.screenshoteditor.capture.CaptureService
+import dev.screenshoteditor.R
+import dev.screenshoteditor.capture.CaptureService
 
 class PersistentNotifier(private val context: Context) {
     

@@ -105,8 +105,8 @@ updated: 2026-02-02
 
 | 名前                  | 値                                               | 役割                           |
 | --------------------- | ------------------------------------------------ | ------------------------------ |
-| `ACTION_CAPTURE`      | `com.example.screenshoteditor.ACTION_CAPTURE`    | 撮影アクションインテント       |
-| `ACTION_STOP`         | `com.example.screenshoteditor.ACTION_STOP`       | サービス停止インテント         |
+| `ACTION_CAPTURE`      | `dev.screenshoteditor.ACTION_CAPTURE`    | 撮影アクションインテント       |
+| `ACTION_STOP`         | `dev.screenshoteditor.ACTION_STOP`       | サービス停止インテント         |
 | `NOTIFICATION_ID`     | 1001                                             | サービス通知ID                 |
 | `CHANNEL_ID`          | `screenshot_service`                             | サービス通知チャネルID         |
 

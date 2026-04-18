@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.ui
+package dev.screenshoteditor.ui
 
 import android.content.Context
 import android.graphics.*

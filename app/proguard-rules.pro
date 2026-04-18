@@ -6,7 +6,7 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Keep DataStore preferences keys
--keep class com.example.screenshoteditor.data.SettingsDataStore$** { *; }
+-keep class dev.screenshoteditor.data.SettingsDataStore$** { *; }
 
 # Keep Parcelable implementations
 -keepclassmembers class * implements android.os.Parcelable {

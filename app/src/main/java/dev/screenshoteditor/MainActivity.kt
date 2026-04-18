@@ -1,4 +1,4 @@
-package com.example.screenshoteditor
+package dev.screenshoteditor
 
 import android.Manifest
 import android.app.NotificationManager
@@ -12,9 +12,9 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.example.screenshoteditor.capture.CaptureService
-import com.example.screenshoteditor.databinding.ActivityMainBinding
-import com.example.screenshoteditor.ui.SettingsActivity
+import dev.screenshoteditor.capture.CaptureService
+import dev.screenshoteditor.databinding.ActivityMainBinding
+import dev.screenshoteditor.ui.SettingsActivity
 
 class MainActivity : AppCompatActivity() {
 

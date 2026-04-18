@@ -1,4 +1,4 @@
-package com.example.screenshoteditor.data
+package dev.screenshoteditor.data
 
 import android.content.ContentValues
 import android.content.Context
