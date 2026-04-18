@@ -4,8 +4,9 @@ updated: 2026-04-18
 ## 最新レビュー結果
 - 日付: 2026-04-18
 - レビュアー: クロ（t2-kuro）
-- 判定: PASS
-- ASVS L1準拠率: 92%（再レビュー後は100%相当、指摘全解消）
+- 判定: PASS（Phase 3 最終レビュー後）
+- ASVS L1準拠率: 95%（Low 4件はドキュメント改善のみ、コード品質は100%相当）
+- 内部スコア: 9/10
 - ビルド検証: `./gradlew assembleDebug` PASS / `./gradlew assembleRelease` PASS（R8 `minifyReleaseWithR8` 通過）
 
 ## 指摘履歴
@@ -28,6 +29,75 @@ updated: 2026-04-18
 ### 2026-04-18 Phase 1 再レビュー
 - 判定: **PASS**（内部スコア 9/10）
 - 全指摘事項完全解消を確認
+
+### 2026-04-18 Phase 2 初回レビュー（アーキテクチャ改善）
+#### Critical
+- なし
+
+#### High
+- H-1: `MutableSharedFlow<Unit>(replay=0)` を per-request ハンドシェイクに使用 → emit/collector順序の暗黙依存、低メモリ/Doze下のServiceタイミングで次回キャプチャに古いemit消費 + SecurityException リスク
+  → **対応済み（2026-04-18）**: `CompletableDeferred<Unit>` per-request に置換、`awaitPrepareComplete()` + `cancelPrepare()` API 追加、Activity/Service双方のタイムアウト/onDestroy時に明示キャンセル
+- H-2: `ScreenCaptureHelper` / `ProjectionController` が Activity Context 強参照、MediaProjection.Callback 匿名クラスでリーク経路
+  → **対応済み（2026-04-18）**: `appContext = context.applicationContext` 正規化、Callback を `projectionCallback` named field 化、`stop()` 冒頭で `unregisterCallback` 実行
+- H-3: `ScreenCaptureHelper.capture()` 多重呼び出しガード無し
+  → **対応済み（2026-04-18）**: `AtomicBoolean` による CAS ガード（`isCapturing`/`isReleased`/`isStopped`）
+
+#### Medium
+- M-1: `Handler.postDelayed` キャンセル不能、Activity onDestroy 後に死んだ Context 参照
+  → **対応済み（2026-04-18）**: `helperScope = CoroutineScope(Dispatchers.Main + SupervisorJob())` 追加、`delay(100ms)` に置換、`release()` で `helperScope.cancel()`、IO処理は `withContext(Dispatchers.IO)` 隔離
+- M-3: `release()` / `stop()` 多重呼び出し時の ImageReader 例外リスク
+  → **対応済み（2026-04-18）**: AtomicBoolean による冪等化（H-3と同時対応）
+- M-4: `MediaProjection.Callback` unregister 未実装
+  → **対応済み（2026-04-18）**: H-2と同時対応
+
+#### Low
+- なし
+
+### 2026-04-18 Phase 2 再レビュー
+- 判定: **PASS**（内部スコア 8.5/10、ASVS L1 100%）
+- 前回指摘 High 3件・Medium 3件が全て適切に解消
+- 残課題は Phase 3 送り（実害小・防御強化系）
+
+### 2026-04-18 Phase 3 レビュー（品質改善）
+#### Critical
+- なし
+
+#### High
+- なし
+
+#### Medium
+- なし
+
+#### Low（いずれもドキュメント改善、実害ゼロ、コミット・push可能判定）
+- L-1: `CaptureService.awaitPrepareComplete()` の KDoc に「Main thread から呼ぶこと」の明記推奨（並走防御の現実用上は Main thread 前提で十分だが、将来の罠回避のため）
+- L-2: `CaptureActivity.startScreenCapture()` の `CancellationException` catch コメント改訂（activityScope cancel と prepareDeferred cancel の区別明確化）
+- L-3: `saveBitmapToTemp()` の `IOException` / `SecurityException` / `Exception` フォールバックで網羅性十分、追加分割不要
+- L-4: `MediaProjection.Callback` unregister 順序（Phase 2 で実装済み）は安全
+
+### 2026-04-18 Phase 3 最終判定
+- 判定: **PASS**（内部スコア 9/10、ASVS L1 95%）
+- Critical/High/Medium ゼロ
+- Low 4件はドキュメント改善レベル、次回触る際の対応で可
+- **コミット・push 可能状態に到達**
+
+## 未対応（オプショナル改善、Phase 4以降の任意対応）
+
+- L-1: `awaitPrepareComplete()` KDoc に Main thread 前提を明記（1行追加）
+- L-2: `CancellationException` catch のコメント改訂（誤解回避）
+
+## Phase 1〜3 通算成果
+
+- **Phase 1**: パッケージ名 `com.example.screenshoteditor` → `dev.screenshoteditor`（Gem-Local-ini と同規約）
+- **Phase 2**: CaptureActivity 責務分離（-47%）、static callback → `CompletableDeferred` per-request 置換、`ServiceLauncher` 抽出
+- **Phase 3**: 並走防御、applicationContext 正規化、Bitmap recycle、例外粒度化、KDoc 契約明記
+
+全フェーズ通算で、スクリーンショット系 Android アプリのセキュリティ要件を以下レベルで満たす：
+- MediaProjection consent token の即時null化
+- Activity Leak 防止の徹底（applicationContext 統一 + Callback unregister）
+- Bitmap ライフサイクル管理（参照比較による二重recycle防止）
+- Foreground Service 昇格の同期処理（per-request CompletableDeferred + タイムアウト + 明示キャンセル）
+- 例外の粒度化と網羅フォールバック
+- リソース解放の冪等化（AtomicBoolean CAS）
 
 ## 適用済みセキュリティ対策
 

@@ -3,32 +3,31 @@ package dev.screenshoteditor.capture
 import androidx.activity.ComponentActivity
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
-import android.graphics.PixelFormat
-import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
-import android.media.ImageReader
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.util.DisplayMetrics
 import android.util.Log
-import android.view.WindowMetrics
-import android.os.Build
 import android.widget.Toast
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.media.projection.MediaProjectionManager
 import dev.screenshoteditor.R
-import dev.screenshoteditor.data.TempCache
 import dev.screenshoteditor.data.SettingsDataStore
 import dev.screenshoteditor.ui.EditorActivity
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import java.io.File
-import java.io.FileOutputStream
 
+/**
+ * スクリーンキャプチャのオーケストレーションを担当する Activity。
+ *
+ * 責務:
+ * 1. キャプチャ同意ダイアログの表示・結果受け取り
+ * 2. CaptureService の Foreground 昇格待機（Flow 経由）
+ * 3. ScreenCaptureHelper への処理委譲
+ * 4. EditorActivity への遷移
+ *
+ * キャプチャの低レベル処理（VirtualDisplay / Bitmap / ファイル保存）は
+ * ScreenCaptureHelper に委譲する。
+ * MediaProjection の取得は ProjectionController が担当するため、ここでは呼ばない。
+ */
 class CaptureActivity : ComponentActivity() {
 
     companion object {
@@ -37,17 +36,14 @@ class CaptureActivity : ComponentActivity() {
     }
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
-    private var mediaProjection: MediaProjection? = null
-    private var virtualDisplay: VirtualDisplay? = null
-    private var imageReader: ImageReader? = null
     private lateinit var settingsDataStore: SettingsDataStore
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var prepareTimeoutRunnable: Runnable? = null
+
+    private var screenCaptureHelper: ScreenCaptureHelper? = null
 
     private val screenCapturePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result: ActivityResult -> // Added type annotation
+    ) { result: ActivityResult ->
         if (result.resultCode == RESULT_OK && result.data != null) {
             startScreenCapture(result.resultCode, result.data!!)
         } else {
@@ -79,179 +75,83 @@ class CaptureActivity : ComponentActivity() {
                     }
                 }
             }
+        } catch (e: IllegalStateException) {
+            // MediaProjectionManager 取得失敗など、システムサービスが利用不可の場合
+            Log.w(TAG, "onCreate: system service unavailable", e)
+            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
+            finish()
         } catch (e: Exception) {
+            Log.w(TAG, "onCreate: unexpected error", e)
             Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
             finish()
         }
     }
 
+    /**
+     * CaptureService の Foreground 昇格を待機し、完了後にキャプチャを開始する。
+     *
+     * MediaProjection の取得（getMediaProjection）は Foreground Service 起動後に
+     * 行う必要があるため、per-request CompletableDeferred の complete を受け取ってから
+     * ScreenCaptureHelper を構築する。
+     *
+     * Deferred を先に取得してから Intent を送信することで、Service 側の complete() が
+     * Activity 側の await() より前に走るレースコンディションを排除している。
+     */
     private fun startScreenCapture(resultCode: Int, data: Intent) {
         if (!CaptureService.isRunning) {
-            val serviceIntent = Intent(this, CaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
-            }
+            ServiceLauncher.startCaptureService(this)
         }
 
-        // コールバックを登録してから昇格リクエストを送る
-        // タイムアウト: 2秒以内に昇格完了通知が来なければエラー扱い
-        val timeoutRunnable = Runnable {
-            Log.w(TAG, "startScreenCapture: prepare timeout, aborting")
-            CaptureService.onPrepareComplete = null
-            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-            finish()
-        }.also { prepareTimeoutRunnable = it }
-
-        CaptureService.onPrepareComplete = {
-            // タイムアウトキャンセル
-            mainHandler.removeCallbacks(timeoutRunnable)
-            prepareTimeoutRunnable = null
-            // Foreground昇格完了後にgetMediaProjectionを呼ぶ
-            try {
-                mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data)
-                continueScreenCapture()
-            } catch (e: Exception) {
-                Log.w(TAG, "getMediaProjection failed", e)
-                Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-                finish()
-            }
-        }
-
-        // Foreground昇格リクエスト送信
-        val prepareIntent = Intent(this, CaptureService::class.java).apply {
-            action = CaptureService.ACTION_PREPARE_CAPTURE
-        }
-        startService(prepareIntent)
-
-        // タイムアウトタイマー開始
-        mainHandler.postDelayed(timeoutRunnable, PREPARE_TIMEOUT_MS)
-    }
-    
-    private fun continueScreenCapture() {
-        if (mediaProjection == null) {
-            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-            finish()
-            return
-        }
+        // per-request Deferred を先に取得してから Intent を送信する（レースコンディション防止）
+        val prepareDeferred = CaptureService.awaitPrepareComplete()
 
         activityScope.launch {
-            val settings = settingsDataStore.settings.first()
-            if (!settings.immediateCapture && settings.delaySeconds > 0) {
-                delay(settings.delaySeconds * 1000L)
+            ServiceLauncher.startCaptureService(this@CaptureActivity, CaptureService.ACTION_PREPARE_CAPTURE)
+
+            // withTimeoutOrNull は通常の CancellationException を伝播させるため、
+            // Service の onDestroy で cancelPrepare() が呼ばれた場合に CancellationException が
+            // throw され、このコルーチンが無言で終了するリスクがある。
+            // try-catch で明示的にキャッチし、タイムアウトと同等のエラー処理を行う。
+            val result = try {
+                withTimeoutOrNull(PREPARE_TIMEOUT_MS) { prepareDeferred.await() }
+            } catch (e: CancellationException) {
+                Log.w(TAG, "startScreenCapture: prepare cancelled (service destroyed?)", e)
+                null  // Service 側の cancel → タイムアウトと同等処理
             }
 
-            withContext(Dispatchers.Main) {
-                performScreenCapture()
+            if (result == null) {
+                Log.w(TAG, "startScreenCapture: prepare timeout or cancelled, aborting")
+                // タイムアウト・キャンセル時は未完了の Deferred をキャンセルしてリソースを解放する
+                CaptureService.cancelPrepare()
+                Toast.makeText(this@CaptureActivity, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
+                finish()
+            } else {
+                continueScreenCapture(resultCode, data)
             }
         }
     }
-    
-    private fun performScreenCapture() {
-        val windowMetrics = windowManager.currentWindowMetrics
-        val bounds = windowMetrics.bounds
-        val width = bounds.width()
-        val height = bounds.height()
-        val density = resources.displayMetrics.densityDpi
 
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 1)
-
-        // Android 14+ requires callback registration before createVirtualDisplay()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            mediaProjection?.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    cleanup()
-                }
-            }, Handler(Looper.getMainLooper()))
+    private suspend fun continueScreenCapture(resultCode: Int, data: Intent) {
+        val settings = settingsDataStore.settings.first()
+        if (!settings.immediateCapture && settings.delaySeconds > 0) {
+            delay(settings.delaySeconds * 1000L)
         }
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ScreenCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            null
-        )
-
-        Handler(Looper.getMainLooper()).postDelayed({
-            captureScreenshot()
-        }, 100)
-    }
-
-    private fun captureScreenshot() {
-        try {
-            val image = imageReader?.acquireLatestImage()
-            if (image != null) {
-                val planes = image.planes
-                val buffer = planes[0].buffer
-                val pixelStride = planes[0].pixelStride
-                val rowStride = planes[0].rowStride
-                val rowPadding = rowStride - pixelStride * image.width
-
-                val bitmap = Bitmap.createBitmap(
-                    image.width + rowPadding / pixelStride,
-                    image.height,
-                    Bitmap.Config.ARGB_8888
-                )
-                bitmap.copyPixelsFromBuffer(buffer)
-                image.close()
-
-                val trimmedBitmap = trimStatusBar(bitmap)
-
-                val tempFile = saveBitmapToTemp(trimmedBitmap)
-
-                cleanup()
-
+        withContext(Dispatchers.Main) {
+            val helper = ScreenCaptureHelper(this@CaptureActivity, resultCode, data)
+            screenCaptureHelper = helper
+            helper.capture { tempFile ->
+                screenCaptureHelper = null
                 if (tempFile != null) {
                     openEditor(tempFile.absolutePath)
                 } else {
-                    Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@CaptureActivity, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
                     finish()
                 }
-            } else {
-                Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-                cleanup()
-                finish()
             }
-        } catch (e: Exception) {
-            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-            cleanup()
-            finish()
         }
     }
 
-    private fun trimStatusBar(bitmap: Bitmap): Bitmap {
-        val statusBarHeight = StatusBarInsets.getStatusBarHeight(this)
-        return if (statusBarHeight > 0 && statusBarHeight < bitmap.height) {
-            Bitmap.createBitmap(
-                bitmap,
-                0,
-                statusBarHeight,
-                bitmap.width,
-                bitmap.height - statusBarHeight
-            )
-        } else {
-            bitmap
-        }
-    }
-    
-    private fun saveBitmapToTemp(bitmap: Bitmap): File? {
-        return try {
-            val tempFile = TempCache.createTempFile(this)
-            FileOutputStream(tempFile).use { out ->
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
-            tempFile
-        } catch (e: Exception) {
-            Log.w(TAG, "saveBitmapToTemp failed", e)
-            null
-        }
-    }
-    
     private fun openEditor(imagePath: String) {
         val intent = Intent(this, EditorActivity::class.java).apply {
             putExtra(EditorActivity.EXTRA_IMAGE_PATH, imagePath)
@@ -259,24 +159,12 @@ class CaptureActivity : ComponentActivity() {
         startActivity(intent)
         finish()
     }
-    
-    private fun cleanup() {
-        imageReader?.close()
-        virtualDisplay?.release()
-        mediaProjection?.stop()
-        
-        imageReader = null
-        virtualDisplay = null
-        mediaProjection = null
-    }
-    
+
     override fun onDestroy() {
         super.onDestroy()
-        // タイムアウトとコールバックをクリア（Activity破棄後の参照を防ぐ）
-        prepareTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
-        prepareTimeoutRunnable = null
-        CaptureService.onPrepareComplete = null
-        cleanup()
+        // activityScope.cancel() で起動中の coroutine（Flow 待機を含む）が自動キャンセルされる
         activityScope.cancel()
+        screenCaptureHelper?.release()
+        screenCaptureHelper = null
     }
 }

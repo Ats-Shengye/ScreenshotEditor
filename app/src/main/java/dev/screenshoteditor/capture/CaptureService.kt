@@ -4,11 +4,8 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import dev.screenshoteditor.MainActivity
@@ -33,13 +30,41 @@ class CaptureService : Service() {
             private set
 
         /**
-         * ACTION_PREPARE_CAPTUREでForeground昇格が完了した際に呼ばれるコールバック。
-         * CaptureActivityがここにコールバックを登録し、通知を受け取ってから
-         * getMediaProjection()を呼ぶことで、postDelayed固定待ちを排除する。
-         * MainLooperで呼ばれることを保証する。
+         * ACTION_PREPARE_CAPTURE で Foreground 昇格が完了したことを CaptureActivity に通知する
+         * per-request の CompletableDeferred。
+         *
+         * SharedFlow と異なり、1 回のリクエストに対し 1 つの Deferred が対応するため、
+         * 古い emit の残留による誤消費が発生しない。
+         * CaptureActivity は awaitPrepareComplete() で Deferred を取得してから
+         * Service への Intent を送信し、Service 側で complete() を呼ぶ。
          */
         @Volatile
-        var onPrepareComplete: (() -> Unit)? = null
+        private var pendingPrepare: CompletableDeferred<Unit>? = null
+
+        /**
+         * 新しい per-request Deferred を生成して返す。
+         * CaptureActivity はこの Deferred を取得した直後に ACTION_PREPARE_CAPTURE を送信すること。
+         *
+         * 連続呼び出し防御: 既存の pendingPrepare をキャンセルしてから新規 Deferred を設定する。
+         * 前の呼び出しが完了しないまま再び呼ばれた場合（並走・連続呼び出し）に、
+         * 古い Deferred が宙吊りになるのを防ぐ。
+         */
+        fun awaitPrepareComplete(): CompletableDeferred<Unit> {
+            pendingPrepare?.cancel()  // 既存Deferredを明示キャンセル（並走・連続呼び出し防御）
+            val deferred = CompletableDeferred<Unit>()
+            pendingPrepare = deferred
+            return deferred
+        }
+
+        /**
+         * 保留中の Deferred をキャンセルして null 化する。
+         * Activity のタイムアウト時・onDestroy 時に呼ぶことで、
+         * Deferred のリーク（完了待ちのまま宙吊り）を防止する。
+         */
+        fun cancelPrepare() {
+            pendingPrepare?.cancel()
+            pendingPrepare = null
+        }
     }
     
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -57,7 +82,14 @@ class CaptureService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID, createNotification())
             }
+        } catch (e: IllegalStateException) {
+            // API 31+ の ForegroundServiceStartNotAllowedException を含む。
+            // バックグラウンド起動制限や startForeground 失敗時に発生する
+            Log.w(TAG, "onCreate: failed to start foreground service", e)
+            isRunning = false
+            stopSelf()
         } catch (e: Exception) {
+            Log.w(TAG, "onCreate: unexpected error during initialization", e)
             isRunning = false
             stopSelf()
         }
@@ -80,12 +112,9 @@ class CaptureService : Service() {
                             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                         )
                     }
-                    // startForeground完了後にコールバックを呼び出す
-                    // MainLooperへpostして確実にForeground昇格後に通知する
-                    Handler(Looper.getMainLooper()).post {
-                        onPrepareComplete?.invoke()
-                        onPrepareComplete = null
-                    }
+                    // startForeground 完了後に per-request Deferred を complete して CaptureActivity に通知する
+                    pendingPrepare?.complete(Unit)
+                    pendingPrepare = null
                 }
                 ACTION_CAPTURE -> {
                     serviceScope.launch {
@@ -101,6 +130,11 @@ class CaptureService : Service() {
                 }
             }
             START_NOT_STICKY
+        } catch (e: IllegalStateException) {
+            // ACTION_PREPARE_CAPTURE 時の startForeground 失敗（API31+ バックグラウンド制限等）
+            Log.w(TAG, "onStartCommand: foreground service start failed", e)
+            stopSelf()
+            START_NOT_STICKY
         } catch (e: Exception) {
             Log.w(TAG, "onStartCommand failed", e)
             stopSelf()
@@ -113,26 +147,24 @@ class CaptureService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isRunning = false
+        // Service が破棄される際、まだ待機中の Deferred があればキャンセルして宙吊りを防ぐ
+        cancelPrepare()
         serviceScope.cancel()
         projectionController?.stop()
     }
     
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    getString(R.string.notification_channel_name),
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply {
-                    description = getString(R.string.notification_channel_description)
-                }
-
-                val notificationManager = getSystemService(NotificationManager::class.java)
-                notificationManager?.createNotificationChannel(channel)
-            } catch (e: Exception) {
-                throw e
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.notification_channel_description)
             }
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager?.createNotificationChannel(channel)
         }
     }
     
@@ -204,6 +236,10 @@ class CaptureService : Service() {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
             startActivity(captureIntent)
+        } catch (e: android.content.ActivityNotFoundException) {
+            Log.w(TAG, "startCaptureActivity: CaptureActivity not found", e)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "startCaptureActivity: permission denied", e)
         } catch (e: Exception) {
             Log.w(TAG, "startCaptureActivity failed", e)
         }

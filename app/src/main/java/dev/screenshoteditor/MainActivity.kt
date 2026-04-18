@@ -1,18 +1,16 @@
 package dev.screenshoteditor
 
 import android.Manifest
-import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.widget.Button
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import dev.screenshoteditor.capture.CaptureService
+import dev.screenshoteditor.capture.ServiceLauncher
 import dev.screenshoteditor.databinding.ActivityMainBinding
 import dev.screenshoteditor.ui.SettingsActivity
 
@@ -84,17 +82,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun startCaptureService() {
         try {
-            val intent = Intent(this, CaptureService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+            ServiceLauncher.startCaptureService(this)
             binding.root.postDelayed({
                 updateServiceStatus()
             }, 1000)
             Toast.makeText(this, "撮影サービスを開始しました", Toast.LENGTH_SHORT).show()
+        } catch (e: SecurityException) {
+            Log.w(TAG, "startCaptureService: permission denied", e)
+            Toast.makeText(this, "サービス開始に失敗しました", Toast.LENGTH_SHORT).show()
+        } catch (e: IllegalStateException) {
+            // Android 12+ でバックグラウンドからのForeground Service起動が制限される場合
+            Log.w(TAG, "startCaptureService: illegal state (background start restriction?)", e)
+            Toast.makeText(this, "サービス開始に失敗しました", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
+            Log.w(TAG, "startCaptureService failed", e)
             Toast.makeText(this, "サービス開始に失敗しました", Toast.LENGTH_SHORT).show()
         }
     }
