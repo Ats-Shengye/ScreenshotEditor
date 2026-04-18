@@ -9,6 +9,10 @@ import android.view.Menu
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import dev.screenshoteditor.R
 import dev.screenshoteditor.data.*
@@ -42,6 +46,8 @@ class EditorActivity : AppCompatActivity() {
         binding = ActivityEditorBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        setupImmersiveMode()
+
         settingsDataStore = SettingsDataStore(this)
         mediaSaver = MediaStoreSaver(this)
         clipboardShare = ClipboardShare(this)
@@ -67,6 +73,51 @@ class EditorActivity : AppCompatActivity() {
         setupViews()
     }
     
+    /**
+     * EditorActivity のみで適用する immersive sticky 設定。
+     *
+     * トリミング操作中に画面上端をタップしたときに、ステータスバーが
+     * 降りてきてクロップ操作と干渉する問題を回避する目的。
+     *
+     * - ステータスバーのみ非表示（ナビゲーションバーは維持）
+     * - 上端スワイプでステータスバーを一時表示可能
+     *   （[WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE]）
+     * - MainActivity / SettingsActivity では通常表示のまま
+     *
+     * AppBar（[binding.actionBar]）の底部パディングには
+     * システムバーのインセットを加算し、ナビゲーションバーと
+     * コンテンツの間隔を維持する。
+     */
+    private fun setupImmersiveMode() {
+        // システムバーがコンテンツ領域に重なることを許可（edge-to-edge 化）
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val controller = WindowInsetsControllerCompat(window, binding.root)
+        // ステータスバーを非表示にする
+        controller.hide(WindowInsetsCompat.Type.statusBars())
+        // 上端スワイプで一時表示→自動で再非表示（タップ干渉を防ぐ）
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+        // XML で指定された初期パディングをリスナー登録前に取得する。
+        // コールバック内で view.paddingBottom を読むと、2 回目以降は
+        // systemBars.bottom が上書きされた値になり累積するため、事前取得が必須。
+        val initialBottomPadding = binding.actionBar.paddingBottom
+
+        // action_bar（下部ボタン群）に初期パディング + ナビゲーションバー分の
+        // 底部インセットを合算して適用する。
+        ViewCompat.setOnApplyWindowInsetsListener(binding.actionBar) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                view.paddingLeft,
+                view.paddingTop,
+                view.paddingRight,
+                initialBottomPadding + systemBars.bottom
+            )
+            insets
+        }
+    }
+
     private fun loadImage() {
         imagePath?.let { path ->
             try {

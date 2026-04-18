@@ -30,13 +30,18 @@
             </intent-filter>
         </activity>
 
-        <!-- Capture Activity (for TORQUE hardware key) -->
+        <!-- Capture Activity (for TORQUE hardware key / launcher shortcut) -->
         <activity
             android:name=".capture.CaptureActivity"
-            android:exported="false"
+            android:exported="true"
             android:excludeFromRecents="true"
             android:launchMode="singleInstance"
-            android:theme="@style/Theme.Transparent">
+            android:theme="@style/Theme.Transparent"
+            android:label="@string/capture_shortcut_label">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
         </activity>
 
         <!-- Editor Activity -->

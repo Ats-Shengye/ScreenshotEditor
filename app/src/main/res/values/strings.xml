@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Screenshot Editor</string>
+    <string name="capture_shortcut_label">撮影</string>
     <string name="settings_title">設定</string>
     <string name="tile_label">スクリーンショット</string>
     

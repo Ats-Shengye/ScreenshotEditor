@@ -42,12 +42,18 @@ class CaptureService : Service() {
         private var pendingPrepare: CompletableDeferred<Unit>? = null
 
         /**
-         * 新しい per-request Deferred を生成して返す。
-         * CaptureActivity はこの Deferred を取得した直後に ACTION_PREPARE_CAPTURE を送信すること。
+         * Foreground昇格完了を待つための CompletableDeferred を生成・登録する。
          *
-         * 連続呼び出し防御: 既存の pendingPrepare をキャンセルしてから新規 Deferred を設定する。
-         * 前の呼び出しが完了しないまま再び呼ばれた場合（並走・連続呼び出し）に、
-         * 古い Deferred が宙吊りになるのを防ぐ。
+         * **Main thread から呼ぶこと**。内部で [pendingPrepare] への
+         * read-modify-write 操作があるが、Main thread シングルスレッド前提で
+         * 逐次化により安全性を担保している。別スレッドから呼ぶとレースが発生する。
+         *
+         * 既に保留中の Deferred がある場合は cancel してから新規 Deferred に
+         * 置き換える（並走呼び出し防御）。
+         *
+         * 呼び出し元は返却された Deferred を取得した直後に [ACTION_PREPARE_CAPTURE] を
+         * Service へ送信すること。順序を逆にすると Service 側の [complete] が先に走る
+         * レースコンディションが発生する。
          */
         fun awaitPrepareComplete(): CompletableDeferred<Unit> {
             pendingPrepare?.cancel()  // 既存Deferredを明示キャンセル（並走・連続呼び出し防御）

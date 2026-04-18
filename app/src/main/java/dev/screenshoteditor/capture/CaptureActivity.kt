@@ -108,10 +108,9 @@ class CaptureActivity : ComponentActivity() {
         activityScope.launch {
             ServiceLauncher.startCaptureService(this@CaptureActivity, CaptureService.ACTION_PREPARE_CAPTURE)
 
-            // withTimeoutOrNull は通常の CancellationException を伝播させるため、
-            // Service の onDestroy で cancelPrepare() が呼ばれた場合に CancellationException が
-            // throw され、このコルーチンが無言で終了するリスクがある。
-            // try-catch で明示的にキャッチし、タイムアウトと同等のエラー処理を行う。
+            // prepareDeferred が外部から cancel された場合のみ到達する。
+            // activityScope 自体が cancel された場合はコルーチン自体が終了するため
+            // このcatchは動かない（Activity 終了中なのでUI通知不要）。
             val result = try {
                 withTimeoutOrNull(PREPARE_TIMEOUT_MS) { prepareDeferred.await() }
             } catch (e: CancellationException) {
