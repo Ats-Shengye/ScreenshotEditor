@@ -3,16 +3,18 @@
 本プロジェクトの全モジュール・関数・定数・設定・セキュリティ対策の一覧。
 コードリーディングの補助資料として使用。
 
-updated: 2026-02-02
+updated: 2026-04-18
 
 ## モジュール・クラス
 
 | 名前                      | 種別     | ファイル                         | 役割                                                         |
 | ------------------------- | -------- | -------------------------------- | ------------------------------------------------------------ |
 | `MainActivity`            | Activity | MainActivity.kt                  | ランチャー、サービス制御UI                                   |
-| `CaptureActivity`         | Activity | capture/CaptureActivity.kt       | MediaProjection権限取得・撮影実行                            |
-| `CaptureService`          | Service  | capture/CaptureService.kt        | 常駐前景サービス、撮影トリガー管理                           |
-| `ProjectionController`    | クラス   | capture/ProjectionController.kt  | MediaProjection/VirtualDisplayライフサイクル管理             |
+| `CaptureActivity`         | Activity | capture/CaptureActivity.kt       | MediaProjection権限取得・撮影オーケストレーション            |
+| `CaptureService`          | Service  | capture/CaptureService.kt        | 常駐前景サービス、撮影トリガー管理、昇格完了ハンドシェイク   |
+| `ProjectionController`    | クラス   | capture/ProjectionController.kt  | MediaProjection/VirtualDisplayライフサイクル管理（使い捨て） |
+| `ScreenCaptureHelper`     | クラス   | capture/ScreenCaptureHelper.kt   | VirtualDisplay作成・Bitmap抽出・トリム・temp保存（使い捨て） |
+| `ServiceLauncher`         | Object   | capture/ServiceLauncher.kt       | CaptureService起動の Build.VERSION 分岐集約（applicationContext正規化） |
 | `StatusBarInsets`         | Object   | capture/StatusBarInsets.kt       | ステータスバー高さ取得                                       |
 | `EditorActivity`          | Activity | ui/EditorActivity.kt             | 画像編集（クロップ・保存・コピー・共有）                     |
 | `CropView`                | View     | ui/CropView.kt                   | タッチ操作による画像クロップUI                               |
@@ -31,18 +33,39 @@ updated: 2026-02-02
 
 | 名前                      | 役割                                                         |
 | ------------------------- | ------------------------------------------------------------ |
-| `startScreenCapture`      | MediaProjection権限応答を受けて撮影準備                      |
-| `performScreenCapture`    | ImageReader/VirtualDisplay作成、ピクセルキャプチャ           |
-| `captureScreenshot`       | ピクセル抽出、ステータスバートリム、temp保存、エディタ起動   |
-| `trimStatusBar`           | Bitmap上部のステータスバー領域を除去                         |
-| `cleanup`                 | ImageReader/VirtualDisplay/MediaProjectionリソース解放       |
+| `startScreenCapture`      | `awaitPrepareComplete` で Deferred 取得 → Foreground昇格要求 → `ScreenCaptureHelper` 起動 |
+| `openEditor`              | Helper 撮影結果を受けて EditorActivity 起動                  |
 
 ### CaptureService
 
+| 名前                      | 役割                                                 |
+| ------------------------- | ---------------------------------------------------- |
+| `awaitPrepareComplete`    | per-request `CompletableDeferred<Unit>` 生成・登録（既存があればcancel） |
+| `cancelPrepare`           | 保留中の Deferred をキャンセル + null化              |
+| `handleCaptureAction`     | ロック状態確認、遅延適用、CaptureActivity起動        |
+| `isScreenLocked`          | KeyguardManagerでデバイスロック状態を判定            |
+
+### ScreenCaptureHelper
+
 | 名前                  | 役割                                                 |
 | --------------------- | ---------------------------------------------------- |
-| `handleCaptureAction` | ロック状態確認、遅延適用、CaptureActivity起動        |
-| `isScreenLocked`      | KeyguardManagerでデバイスロック状態を判定            |
+| `capture`             | VirtualDisplay作成→ピクセル抽出→トリム→temp保存のオーケストレーション（`AtomicBoolean` 多重ガード） |
+| `release`             | ProjectionController.stop / ImageReader.close / helperScope.cancel（冪等化） |
+
+内部処理: `performScreenCapture`（VirtualDisplay + ImageReader）/ `captureScreenshot`（Bitmap抽出 + trim + recycle + 保存）/ `trimStatusBar` / `saveBitmapToTemp` は private、`helperScope` 下で管理。
+
+### ServiceLauncher
+
+| 名前                      | 役割                                                 |
+| ------------------------- | ---------------------------------------------------- |
+| `startCaptureService`     | `context.applicationContext` に正規化して `startForegroundService`/`startService` を Build.VERSION で分岐 |
+
+### ProjectionController
+
+| 名前      | 役割                                                         |
+| --------- | ------------------------------------------------------------ |
+| `start`   | `getMediaProjection` + `createVirtualDisplay` + Android 14+ Callback登録 |
+| `stop`    | Callback unregister → ImageReader.close → VirtualDisplay.release → MediaProjection.stop → consent token null化（冪等化） |
 
 ### EditorActivity
 
@@ -105,10 +128,23 @@ updated: 2026-02-02
 
 | 名前                  | 値                                               | 役割                           |
 | --------------------- | ------------------------------------------------ | ------------------------------ |
-| `ACTION_CAPTURE`      | `dev.screenshoteditor.ACTION_CAPTURE`    | 撮影アクションインテント       |
-| `ACTION_STOP`         | `dev.screenshoteditor.ACTION_STOP`       | サービス停止インテント         |
-| `NOTIFICATION_ID`     | 1001                                             | サービス通知ID                 |
-| `CHANNEL_ID`          | `screenshot_service`                             | サービス通知チャネルID         |
+| `ACTION_CAPTURE`          | `dev.screenshoteditor.ACTION_CAPTURE`          | 撮影アクションインテント       |
+| `ACTION_STOP`             | `dev.screenshoteditor.ACTION_STOP`             | サービス停止インテント         |
+| `ACTION_PREPARE_CAPTURE`  | `dev.screenshoteditor.ACTION_PREPARE_CAPTURE`  | Foreground昇格要求インテント   |
+| `NOTIFICATION_ID`         | 1001                                           | サービス通知ID                 |
+| `CHANNEL_ID`              | `screenshot_service`                           | サービス通知チャネルID         |
+
+### CaptureActivity
+
+| 名前                  | 値       | 役割                                               |
+| --------------------- | -------- | -------------------------------------------------- |
+| `PREPARE_TIMEOUT_MS`  | 2000L    | Foreground昇格完了待ちタイムアウト（ミリ秒）       |
+
+### ScreenCaptureHelper
+
+| 名前              | 値       | 役割                                   |
+| ----------------- | -------- | -------------------------------------- |
+| `FRAME_WAIT_MS`   | 100L     | VirtualDisplay起動後のフレーム安定待ち |
 
 ### EditorActivity
 
