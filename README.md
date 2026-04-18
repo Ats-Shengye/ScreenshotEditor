@@ -62,6 +62,8 @@ app/
 │   ├── CaptureActivity.kt
 │   ├── CaptureService.kt
 │   ├── ProjectionController.kt
+│   ├── ScreenCaptureHelper.kt
+│   ├── ServiceLauncher.kt
 │   └── StatusBarInsets.kt
 ├── ui/               # UI関連
 │   ├── EditorActivity.kt
