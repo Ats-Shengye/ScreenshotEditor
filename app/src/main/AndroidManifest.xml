@@ -30,11 +30,15 @@
             </intent-filter>
         </activity>
 
-        <!-- Capture Activity (for TORQUE hardware key / launcher shortcut) -->
+        <!-- Capture Activity (for TORQUE hardware key / launcher shortcut).
+             exported="true" is required because it is a launcher entry point.
+             configChanges: the Activity has no UI, and recreation during the consent dialog or a
+             delayed capture would drop the in-flight capture flow. -->
         <activity
             android:name=".capture.CaptureActivity"
             android:exported="true"
             android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden"
             android:launchMode="singleInstance"
             android:theme="@style/Theme.Transparent"
             android:label="@string/capture_shortcut_label">

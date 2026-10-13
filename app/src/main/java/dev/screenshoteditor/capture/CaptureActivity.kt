@@ -1,32 +1,40 @@
 package dev.screenshoteditor.capture
 
-import androidx.activity.ComponentActivity
-import android.content.Context
+import android.app.KeyguardManager
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import android.widget.Toast
-import androidx.activity.result.ActivityResult
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import android.media.projection.MediaProjectionManager
+import androidx.annotation.StringRes
+import androidx.lifecycle.lifecycleScope
 import dev.screenshoteditor.R
 import dev.screenshoteditor.data.SettingsDataStore
+import dev.screenshoteditor.data.TempCache
 import dev.screenshoteditor.ui.EditorActivity
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 /**
- * スクリーンキャプチャのオーケストレーションを担当する Activity。
+ * スクリーンキャプチャのオーケストレーションを担当する透明 Activity。
  *
  * 責務:
- * 1. キャプチャ同意ダイアログの表示・結果受け取り
- * 2. CaptureService の Foreground 昇格待機（Flow 経由）
- * 3. ScreenCaptureHelper への処理委譲
- * 4. EditorActivity への遷移
+ * 1. ロック中撮影の拒否判定とキャプチャ同意ダイアログの表示
+ * 2. CaptureService の Foreground（mediaProjection 型）昇格待機
+ * 3. 遅延撮影の待機（待機中は下のアプリへタッチを通す）
+ * 4. ScreenCaptureHelper への処理委譲と EditorActivity への遷移
  *
- * キャプチャの低レベル処理（VirtualDisplay / Bitmap / ファイル保存）は
- * ScreenCaptureHelper に委譲する。
- * MediaProjection の取得は ProjectionController が担当するため、ここでは呼ばない。
+ * キャプチャの低レベル処理（VirtualDisplay / Bitmap / ファイル保存）は ScreenCaptureHelper に委譲する。
+ * コルーチンは lifecycleScope（Main）で動かし、onDestroy で自動キャンセルされる。
  */
 class CaptureActivity : ComponentActivity() {
 
@@ -35,95 +43,85 @@ class CaptureActivity : ComponentActivity() {
         private const val PREPARE_TIMEOUT_MS = 2000L
     }
 
-    private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var settingsDataStore: SettingsDataStore
-    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
     private var screenCaptureHelper: ScreenCaptureHelper? = null
+    private var prepareDeferred: CompletableDeferred<Unit>? = null
 
     private val screenCapturePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result: ActivityResult ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            startScreenCapture(result.resultCode, result.data!!)
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == RESULT_OK && data != null) {
+            startScreenCapture(result.resultCode, data)
         } else {
-            Toast.makeText(this, getString(R.string.message_permission_required), Toast.LENGTH_SHORT).show()
-            finish()
+            failAndFinish(R.string.message_permission_required)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        settingsDataStore = SettingsDataStore(this)
 
-        try {
-            settingsDataStore = SettingsDataStore(this)
-            mediaProjectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
-                ?: throw IllegalStateException("MediaProjectionManager not available")
+        val mediaProjectionManager = getSystemService(MediaProjectionManager::class.java)
+        if (mediaProjectionManager == null) {
+            Log.w(TAG, "onCreate: MediaProjectionManager unavailable")
+            failAndFinish(R.string.message_screenshot_failed)
+            return
+        }
 
-            activityScope.launch {
-                val settings = settingsDataStore.settings.first()
-                val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
-                if (settings.disableOnLock && keyguard.isKeyguardLocked) {
-                    withContext(Dispatchers.Main) {
-                        Toast.makeText(this@CaptureActivity, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-                        finish()
-                    }
-                } else {
-                    val captureIntent = mediaProjectionManager.createScreenCaptureIntent()
-                    withContext(Dispatchers.Main) {
-                        screenCapturePermissionLauncher.launch(captureIntent)
-                    }
-                }
+        lifecycleScope.launch {
+            val settings = settingsDataStore.settings.first()
+            val keyguard = getSystemService(KeyguardManager::class.java)
+            // Security Note: refuse while locked so that the notification/tile cannot be used to
+            // capture lock-screen contents. A missing KeyguardManager is treated as locked (fail-safe).
+            if (settings.disableOnLock && (keyguard == null || keyguard.isKeyguardLocked)) {
+                failAndFinish(R.string.message_screenshot_failed)
+                return@launch
             }
-        } catch (e: IllegalStateException) {
-            // MediaProjectionManager 取得失敗など、システムサービスが利用不可の場合
-            Log.w(TAG, "onCreate: system service unavailable", e)
-            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-            finish()
-        } catch (e: Exception) {
-            Log.w(TAG, "onCreate: unexpected error", e)
-            Toast.makeText(this, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-            finish()
+            screenCapturePermissionLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
         }
     }
 
     /**
      * CaptureService の Foreground 昇格を待機し、完了後にキャプチャを開始する。
      *
-     * MediaProjection の取得（getMediaProjection）は Foreground Service 起動後に
-     * 行う必要があるため、per-request CompletableDeferred の complete を受け取ってから
-     * ScreenCaptureHelper を構築する。
-     *
+     * MediaProjection の取得（getMediaProjection）は Foreground Service 昇格後に行う必要があるため、
+     * per-request CompletableDeferred の complete を受け取ってから ScreenCaptureHelper を構築する。
      * Deferred を先に取得してから Intent を送信することで、Service 側の complete() が
      * Activity 側の await() より前に走るレースコンディションを排除している。
      */
     private fun startScreenCapture(resultCode: Int, data: Intent) {
-        if (!CaptureService.isRunning) {
-            ServiceLauncher.startCaptureService(this)
-        }
+        val deferred = CaptureService.awaitPrepareComplete()
+        prepareDeferred = deferred
 
-        // per-request Deferred を先に取得してから Intent を送信する（レースコンディション防止）
-        val prepareDeferred = CaptureService.awaitPrepareComplete()
-
-        activityScope.launch {
-            ServiceLauncher.startCaptureService(this@CaptureActivity, CaptureService.ACTION_PREPARE_CAPTURE)
-
-            // prepareDeferred が外部から cancel された場合のみ到達する。
-            // activityScope 自体が cancel された場合はコルーチン自体が終了するため
-            // このcatchは動かない（Activity 終了中なのでUI通知不要）。
-            val result = try {
-                withTimeoutOrNull(PREPARE_TIMEOUT_MS) { prepareDeferred.await() }
-            } catch (e: CancellationException) {
-                Log.w(TAG, "startScreenCapture: prepare cancelled (service destroyed?)", e)
-                null  // Service 側の cancel → タイムアウトと同等処理
+        lifecycleScope.launch {
+            try {
+                if (!CaptureService.isRunning) ServiceLauncher.startCaptureService(this@CaptureActivity)
+                ServiceLauncher.startCaptureService(this@CaptureActivity, CaptureService.ACTION_PREPARE_CAPTURE)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "startScreenCapture: service start not allowed", e)
+                abortPrepare()
+                return@launch
+            } catch (e: SecurityException) {
+                Log.w(TAG, "startScreenCapture: service start not permitted", e)
+                abortPrepare()
+                return@launch
             }
 
-            if (result == null) {
+            val prepared = try {
+                withTimeoutOrNull(PREPARE_TIMEOUT_MS) { deferred.await() }
+            } catch (e: CancellationException) {
+                // Either the Service cancelled the Deferred (onDestroy / a newer request) or this
+                // coroutine itself was cancelled. ensureActive() rethrows in the latter case so that
+                // nothing touches a destroyed Activity.
+                ensureActive()
+                Log.w(TAG, "startScreenCapture: prepare cancelled by service", e)
+                null
+            }
+
+            if (prepared == null) {
                 Log.w(TAG, "startScreenCapture: prepare timeout or cancelled, aborting")
-                // タイムアウト・キャンセル時は未完了の Deferred をキャンセルしてリソースを解放する
-                CaptureService.cancelPrepare()
-                Toast.makeText(this@CaptureActivity, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-                finish()
+                abortPrepare()
             } else {
                 continueScreenCapture(resultCode, data)
             }
@@ -132,37 +130,72 @@ class CaptureActivity : ComponentActivity() {
 
     private suspend fun continueScreenCapture(resultCode: Int, data: Intent) {
         val settings = settingsDataStore.settings.first()
-        if (!settings.immediateCapture && settings.delaySeconds > 0) {
+        if (settings.isDelayedCapture) {
+            letTouchesPassThrough()
             delay(settings.delaySeconds * 1000L)
         }
 
-        withContext(Dispatchers.Main) {
-            val helper = ScreenCaptureHelper(this@CaptureActivity, resultCode, data)
-            screenCaptureHelper = helper
-            helper.capture { tempFile ->
-                screenCaptureHelper = null
-                if (tempFile != null) {
-                    openEditor(tempFile.absolutePath)
-                } else {
-                    Toast.makeText(this@CaptureActivity, getString(R.string.message_screenshot_failed), Toast.LENGTH_SHORT).show()
-                    finish()
-                }
+        val helper = ScreenCaptureHelper(this, resultCode, data)
+        screenCaptureHelper = helper
+        helper.capture(CaptureGeometry.fromActivity(this)) { tempFile ->
+            screenCaptureHelper = null
+            if (isFinishing || isDestroyed) {
+                // Nobody will open this capture; do not leave screen contents on disk.
+                tempFile?.let { TempCache.deleteQuietly(it) }
+                return@capture
             }
+            if (tempFile != null) openEditor(tempFile) else failAndFinish(R.string.message_screenshot_failed)
         }
     }
 
-    private fun openEditor(imagePath: String) {
+    /**
+     * Lets the user keep operating the app underneath while a delayed capture is pending.
+     *
+     * Design Decision: this Activity stays in the foreground instead of calling moveTaskToBack().
+     * Starting EditorActivity after the delay from the background would be a background activity
+     * launch, and a running foreground service (even of type mediaProjection) is not one of the
+     * documented exemptions, so the editor might silently never open. Keeping the Activity resumed
+     * keeps that start allowed ("the app has a visible window").
+     *
+     * The window is made non-touchable and fully transparent (alpha 0): touches inside it pass
+     * through, and Android 12+ does not block pass-through touches for completely transparent
+     * windows. NOT_TOUCH_MODAL sends touches outside the (floating) window to the window behind
+     * instead of consuming them, and NOT_FOCUSABLE hands key focus to the app underneath.
+     */
+    private fun letTouchesPassThrough() {
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        )
+        window.attributes = window.attributes.apply { alpha = 0f }
+    }
+
+    private fun openEditor(imageFile: File) {
         val intent = Intent(this, EditorActivity::class.java).apply {
-            putExtra(EditorActivity.EXTRA_IMAGE_PATH, imagePath)
+            putExtra(EditorActivity.EXTRA_IMAGE_PATH, imageFile.absolutePath)
         }
         startActivity(intent)
         finish()
     }
 
+    /** Cancels a pending prepare request and reports the failure. */
+    private fun abortPrepare() {
+        CaptureService.cancelPrepare()
+        failAndFinish(R.string.message_screenshot_failed)
+    }
+
+    private fun failAndFinish(@StringRes message: Int) {
+        if (isFinishing || isDestroyed) return
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        finish()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
-        // activityScope.cancel() で起動中の coroutine（Flow 待機を含む）が自動キャンセルされる
-        activityScope.cancel()
+        // lifecycleScope is cancelled by the framework; resources outside it are released here.
+        prepareDeferred?.cancel()
+        prepareDeferred = null
         screenCaptureHelper?.release()
         screenCaptureHelper = null
     }

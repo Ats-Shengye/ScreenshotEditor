@@ -1,7 +1,10 @@
 package dev.screenshoteditor.capture
 
-import android.app.*
-import android.content.Context
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -10,24 +13,33 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import dev.screenshoteditor.MainActivity
 import dev.screenshoteditor.R
-import dev.screenshoteditor.capture.CaptureActivity
-import dev.screenshoteditor.data.SettingsDataStore
-import kotlinx.coroutines.*
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
+/**
+ * Foreground service that keeps the capture notification available and, on request, upgrades
+ * itself to the mediaProjection foreground type required before MediaProjection can be obtained.
+ *
+ * The persistent notification itself is mandatory for a foreground service, so it has no on/off
+ * setting.
+ */
 class CaptureService : Service() {
-    
+
     companion object {
         private const val TAG = "CaptureService"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "screenshot_service"
-        const val ACTION_CAPTURE = "dev.screenshoteditor.ACTION_CAPTURE"
         const val ACTION_STOP = "dev.screenshoteditor.ACTION_STOP"
         const val ACTION_PREPARE_CAPTURE = "dev.screenshoteditor.ACTION_PREPARE_CAPTURE"
 
-        @Volatile
-        var isRunning = false
-            private set
+        private val runningState = MutableStateFlow(false)
+
+        /** Observable running state, used by MainActivity to update its UI after start/stop. */
+        val running: StateFlow<Boolean> = runningState.asStateFlow()
+
+        val isRunning: Boolean get() = runningState.value
 
         /**
          * ACTION_PREPARE_CAPTURE で Foreground 昇格が完了したことを CaptureActivity に通知する
@@ -52,11 +64,11 @@ class CaptureService : Service() {
          * 置き換える（並走呼び出し防御）。
          *
          * 呼び出し元は返却された Deferred を取得した直後に [ACTION_PREPARE_CAPTURE] を
-         * Service へ送信すること。順序を逆にすると Service 側の [complete] が先に走る
+         * Service へ送信すること。順序を逆にすると Service 側の complete が先に走る
          * レースコンディションが発生する。
          */
         fun awaitPrepareComplete(): CompletableDeferred<Unit> {
-            pendingPrepare?.cancel()  // 既存Deferredを明示キャンセル（並走・連続呼び出し防御）
+            pendingPrepare?.cancel()
             val deferred = CompletableDeferred<Unit>()
             pendingPrepare = deferred
             return deferred
@@ -72,35 +84,29 @@ class CaptureService : Service() {
             pendingPrepare = null
         }
     }
-    
-    private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private lateinit var settingsDataStore: SettingsDataStore
-    private var projectionController: ProjectionController? = null
-    
+
     override fun onCreate() {
         super.onCreate()
         try {
-            isRunning = true
-            settingsDataStore = SettingsDataStore(this)
             createNotificationChannel()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             } else {
                 startForeground(NOTIFICATION_ID, createNotification())
             }
+            runningState.value = true
         } catch (e: IllegalStateException) {
             // API 31+ の ForegroundServiceStartNotAllowedException を含む。
             // バックグラウンド起動制限や startForeground 失敗時に発生する
             Log.w(TAG, "onCreate: failed to start foreground service", e)
-            isRunning = false
             stopSelf()
-        } catch (e: Exception) {
-            Log.w(TAG, "onCreate: unexpected error during initialization", e)
-            isRunning = false
+        } catch (e: SecurityException) {
+            // マニフェストの foregroundServiceType と権限の不整合
+            Log.w(TAG, "onCreate: foreground service type not permitted", e)
             stopSelf()
         }
     }
-    
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // intent==nullはシステムによる再起動を意味する。consent tokenが失われているため停止する
         if (intent == null) {
@@ -108,103 +114,75 @@ class CaptureService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        return try {
+        try {
             when (intent.action) {
                 ACTION_PREPARE_CAPTURE -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                         startForeground(
                             NOTIFICATION_ID,
                             createNotification(),
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                         )
                     }
                     // startForeground 完了後に per-request Deferred を complete して CaptureActivity に通知する
                     pendingPrepare?.complete(Unit)
                     pendingPrepare = null
                 }
-                ACTION_CAPTURE -> {
-                    serviceScope.launch {
-                        try {
-                            handleCaptureAction()
-                        } catch (e: Exception) {
-                            Log.w(TAG, "handleCaptureAction failed", e)
-                        }
-                    }
-                }
-                ACTION_STOP -> {
-                    stopSelf()
-                }
+                ACTION_STOP -> stopSelf()
             }
-            START_NOT_STICKY
         } catch (e: IllegalStateException) {
             // ACTION_PREPARE_CAPTURE 時の startForeground 失敗（API31+ バックグラウンド制限等）
             Log.w(TAG, "onStartCommand: foreground service start failed", e)
             stopSelf()
-            START_NOT_STICKY
-        } catch (e: Exception) {
-            Log.w(TAG, "onStartCommand failed", e)
+        } catch (e: SecurityException) {
+            // mediaProjection 型への昇格は同意取得後でないと拒否される（Android 14+）
+            Log.w(TAG, "onStartCommand: foreground service type not permitted", e)
             stopSelf()
-            START_NOT_STICKY
         }
+        return START_NOT_STICKY
     }
-    
+
     override fun onBind(intent: Intent?): IBinder? = null
-    
+
     override fun onDestroy() {
         super.onDestroy()
-        isRunning = false
+        runningState.value = false
         // Service が破棄される際、まだ待機中の Deferred があればキャンセルして宙吊りを防ぐ
         cancelPrepare()
-        serviceScope.cancel()
-        projectionController?.stop()
     }
-    
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.notification_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.notification_channel_description)
-            }
 
-            val notificationManager = getSystemService(NotificationManager::class.java)
-            notificationManager?.createNotificationChannel(channel)
+    private fun createNotificationChannel() {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.notification_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = getString(R.string.notification_channel_description)
         }
+        getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
     }
-    
+
     private fun createNotification(): Notification {
         val mainIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val mainPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            mainIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 0, mainIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
+
         val captureActivityIntent = Intent(this, CaptureActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val capturePendingIntent = PendingIntent.getActivity(
-            this,
-            1,
-            captureActivityIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 1, captureActivityIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
-        val stopIntent = Intent(this, CaptureService::class.java).apply {
-            action = ACTION_STOP
-        }
+
+        val stopIntent = Intent(this, CaptureService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(
-            this,
-            2,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 2, stopIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_content))
@@ -222,37 +200,5 @@ class CaptureService : Service() {
                 stopPendingIntent
             )
             .build()
-    }
-    
-    private suspend fun handleCaptureAction() {
-        val settings = settingsDataStore.settings.first()
-        
-        // Check if screen is locked and capture is disabled
-        if (settings.disableOnLock && isScreenLocked()) {
-            return
-        }
-        
-        // Handle delayed capture if enabled
-        if (!settings.immediateCapture) {
-            delay(settings.delaySeconds * 1000L)
-        }
-        
-        try {
-            val captureIntent = Intent(this, CaptureActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            startActivity(captureIntent)
-        } catch (e: android.content.ActivityNotFoundException) {
-            Log.w(TAG, "startCaptureActivity: CaptureActivity not found", e)
-        } catch (e: SecurityException) {
-            Log.w(TAG, "startCaptureActivity: permission denied", e)
-        } catch (e: Exception) {
-            Log.w(TAG, "startCaptureActivity failed", e)
-        }
-    }
-    
-    private fun isScreenLocked(): Boolean {
-        val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
-        return keyguardManager.isKeyguardLocked
     }
 }

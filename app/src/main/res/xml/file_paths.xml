@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths xmlns:android="http://schemas.android.com/apk/res/android">
+<!--
+  Only cacheDir/images/ (share/ and clipboard/ subdirectories, see TempCache) is exposed.
+  Raw captures in filesDir/temp/ are never handed to other apps, so they are deliberately not listed.
+-->
+<paths>
     <cache-path name="shared_images" path="images/"/>
-    <files-path name="temp_images" path="temp/"/>
 </paths>

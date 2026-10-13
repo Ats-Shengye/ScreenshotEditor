@@ -1,5 +1,7 @@
 # Security Report
-updated: 2026-04-18
+updated: 2026-10-13
+
+> 2026-10-13: 本文中の「適用済みセキュリティ対策」等に実装と合わない記述があった。過去の記録は書き換えず、末尾の「2026-10-13 訂正」で正す。
 
 ## 最新レビュー結果
 - 日付: 2026-04-18
@@ -156,3 +158,28 @@ updated: 2026-04-18
 - Bitmap `recycle()` 追加
 - `Exception` catch → 具体例外粒度化
 - `Handler(Looper.getMainLooper())` 重複削除
+
+## 2026-10-13 訂正（実装との食い違い）
+
+2026-10-13 のコードレビューで、上記の記録のうち実装と合わない記述が見つかった。記録時点で実装されていなかったもの・事実と異なるものを以下のとおり訂正する。あわせて行ったコード修正もここに記す（修正後のセキュリティレビュー前の時点）。
+
+| 該当箇所（上記の記述） | 訂正 |
+|---|---|
+| 適用済み > データ保護「URI権限管理: … 共有後30秒で自動revoke」 | 30秒後の revoke は実装されていなかった。現在は `FLAG_GRANT_READ_URI_PERMISSION` による受け取り側への一時付与のみで、時間指定の revoke はしない。代わりに共有用ファイル（`cacheDir/images/share/`）を24時間で削除する |
+| 適用済み > データ保護「クリップボード自動クリア: タイマー設定で削除、即時クリアボタンも提供」 | 自動クリアは有効化する経路が無く、一度も動いていなかった。即時クリアボタンも存在しなかった。2026-10-13 に `clearSeconds` へ一本化して修正（既定は 0 = しない。他アプリでコピーした内容まで消えるため opt-in にした）。`clearPrimaryClip()` でクリアし、クリップボード用ファイルも削除する。即時クリアボタンは追加していない。クリア時点でクリップボードの中身が自アプリのものかは確認できない（Android 10 以降、フォーカスの無いアプリはクリップボードを読めない） |
+| 適用済み > コード保護「ログ削除: リリースビルドからデバッグログ完全除去」 | 記録時点では `proguard-rules.pro` に `-assumenosideeffects` が無く、ログは除去されていなかった。2026-10-13 に追加し、`Log.v/d/i/w` を R8 で除去するようにした（`Log.e` は残す） |
+| 適用済み > Android プラットフォーム「最小権限原則: POST_NOTIFICATIONS / FOREGROUND_SERVICE / FOREGROUND_SERVICE_MEDIA_PROJECTION のみ」 | `FOREGROUND_SERVICE_SPECIAL_USE` も宣言している（常駐通知用の specialUse 前景サービス） |
+| 適用済み > Android プラットフォーム「exported=false: 内部コンポーネント全て非公開（TileServiceのみ例外）」 | CaptureActivity もランチャー起点（TORQUE のハードキー割り当て用）のため exported=true。MainActivity も同様 |
+| 適用済み > Intent / IPC「Intent Action ハードコード: `ACTION_CAPTURE` / `ACTION_STOP`」 | `ACTION_CAPTURE` は送信元が無い未使用経路だったため 2026-10-13 に削除。残るのは `ACTION_STOP` と `ACTION_PREPARE_CAPTURE` |
+| 適用済み > Intent / IPC「Broadcast動的登録: Service内のみ、exported=false」 | BroadcastReceiver は静的・動的とも使用していない |
+| Conditional Application 判定「パストラバーサル防止: … `createTempFile`は`File(context.cacheDir, ...)`」 | 一時ファイルは `filesDir/temp/` に作る。EditorActivity は受け取ったパスが同ディレクトリ配下かを canonicalPath で検証する |
+| Phase 2 M-1「`delay(100ms)` に置換」 | 固定100ms待ちは遅い端末でフレームが届かず失敗する原因だった。2026-10-13 に `ImageReader.setOnImageAvailableListener` で最初のフレームを待つ方式（2秒でタイムアウト）に変更 |
+
+### 2026-10-13 のコード修正（セキュリティに関わるもの）
+- クリップボード自動クリアを実際に動くようにした（上表）。タイマーは Activity に紐づかないプロセス単位のオブジェクトが applicationContext だけを持って管理する
+- 共有用・クリップボード用ファイルの削除規則を追加（共有用は24時間、クリップボード用はクリア時と次のコピー時）
+- FileProvider の公開範囲から `filesDir/temp/` を外した（URI を発行しないため不要）
+- 設定値の検証を追加（保存時は許容値以外を拒否、読み込み時は既定値に置換、読み込み失敗時は既定値）
+- 不要になった設定キーを DataStore から削除するマイグレーションを追加
+- 未使用の `NotificationHelper` / `PersistentNotifier` と、CaptureService の `ACTION_CAPTURE` 経路を削除
+- KeyguardManager が取得できない場合はロック中として扱う（fail-safe）

@@ -6,6 +6,7 @@ import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
+import dev.screenshoteditor.R
 import dev.screenshoteditor.capture.CaptureActivity
 import dev.screenshoteditor.capture.CaptureService
 
@@ -51,8 +52,8 @@ class ScreenshotTileService : TileService() {
             } else {
                 Tile.STATE_INACTIVE
             }
-            tile.label = "スクリーンショット"
-            tile.contentDescription = "スクリーンショットを撮影"
+            tile.label = getString(R.string.tile_label)
+            tile.contentDescription = getString(R.string.tile_content_description)
             tile.updateTile()
         }
     }
